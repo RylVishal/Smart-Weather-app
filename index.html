@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SkyCast — Weather Dashboard</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="style.css"/>
+<style>
+/* ══════════════════════════════════════════════════════
+   Navigate Tab — Route Weather Intelligence
+   ══════════════════════════════════════════════════════ */
+.nav-layout {
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+.nav-left {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  background: rgba(13,21,37,0.6);
+  backdrop-filter: blur(15px);
+}
+.nav-header-block {
+  padding: 22px 22px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.nav-title {
+  font-size: 1.05rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--accent), var(--accent3));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.nav-sub {
+  font-size: 0.62rem;
+  color: var(--text3);
+  margin-top: 3px;
+  font-family: var(--mono);
+  letter-spacing: 0.06em;
+}
+.route-form {
+  padding: 18px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.route-input-group { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.route-label {
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+  text-transform: uppercase;
+  padding-left: 2px;
+}
+.route-input-wrap { position: relative; }
+.route-dot {
+  position: absolute;
+  left: 13px; top: 50%;
+  transform: translateY(-50%);
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  z-index: 1;
+}
+.route-dot.origin { background: var(--accent3); box-shadow: 0 0 8px rgba(45,212,160,0.7); }
+.route-dot.dest   { background: var(--hot);     box-shadow: 0 0 8px rgba(255,112,64,0.7); }
+.route-input {
+  width: 100%;
+  background: rgba(20,30,52,0.7);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  padding: 11px 14px 11px 34px;
+  outline: none;
+  transition: all 0.25s;
+}
+.route-input:focus { border-color: var(--accent); background: rgba(25,38,65,0.9); box-shadow: 0 0 0 3px rgba(77,166,255,0.1); }
+.route-input::placeholder { color: var(--text3); }
+.route-suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  background: rgba(20,30,52,0.97);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  overflow: hidden;
+  z-index: 9999;
+  display: none;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+}
+.route-suggestions.open { display: block; }
+.route-suggestions .suggestion-item {
+  padding: 9px 14px;
+  font-size: 0.8rem;
+  color: var(--text2);
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: all 0.15s;
+}
+.route-suggestions .suggestion-item:last-child { border-bottom: none; }
+.route-suggestions .suggestion-item:hover { background: rgba(77,166,255,0.1); color: var(--text); padding-left: 18px; }
+.route-connector { padding: 0 17px; }
+.connector-line { width: 1px; height: 12px; background: linear-gradient(to bottom, var(--accent3), var(--hot)); opacity: 0.4; }
+.analyze-btn {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border: none;
+  border-radius: 11px;
+  color: #fff;
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  font-weight: 700;
+  padding: 13px 20px;
+  cursor: pointer;
+  transition: all 0.25s;
+  box-shadow: 0 4px 16px rgba(77,166,255,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.analyze-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(77,166,255,0.4); }
+.analyze-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* Loading */
+.nav-loading { padding: 16px 22px; display: none; flex-direction: column; gap: 8px; flex-shrink: 0; }
+.nav-loading-bar { height: 3px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.nav-loading-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent3));
+  border-radius: 3px;
+  width: 40%;
+  animation: load-sweep 1.8s ease-in-out infinite;
+}
+@keyframes load-sweep { 0% { transform: translateX(-150%); } 100% { transform: translateX(400%); } }
+.nav-loading-text { font-family: var(--mono); font-size: 0.68rem; color: var(--text3); letter-spacing: 0.08em; }
+.nav-error {
+  margin: 0 22px 16px;
+  background: rgba(255,92,92,0.08);
+  border: 1px solid rgba(255,92,92,0.25);
+  border-left: 3px solid var(--red);
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 0.78rem;
+  color: var(--red);
+  display: none;
+  flex-shrink: 0;
+}
+
+/* Summary banner */
+.trip-summary { padding: 14px 22px; border-bottom: 1px solid var(--border); display: none; flex-shrink: 0; }
+.summary-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 15px;
+  border-radius: 12px;
+  border: 1px solid;
+  margin-bottom: 11px;
+}
+.summary-banner.good    { background: rgba(45,212,160,0.08); border-color: rgba(45,212,160,0.3); }
+.summary-banner.warning { background: rgba(255,192,64,0.08); border-color: rgba(255,192,64,0.3); }
+.summary-banner.danger  { background: rgba(255,64,64,0.08);  border-color: rgba(255,64,64,0.3); }
+.summary-icon { font-size: 1.6rem; flex-shrink: 0; }
+.summary-text { flex: 1; }
+.summary-status { font-size: 0.68rem; font-weight: 800; letter-spacing: 0.15em; text-transform: uppercase; font-family: var(--mono); }
+.summary-status.good    { color: var(--accent3); }
+.summary-status.warning { color: var(--warn); }
+.summary-status.danger  { color: var(--red); }
+.summary-msg { font-size: 0.76rem; color: var(--text2); margin-top: 3px; line-height: 1.4; }
+.trip-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+.meta-pill {
+  background: rgba(20,30,52,0.6);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--text3);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.meta-pill span { color: var(--text); font-weight: 700; }
+
+/* Alerts */
+.alert-list { padding: 0 22px 14px; display: none; flex-direction: column; gap: 7px; flex-shrink: 0; }
+.alert-list-title { font-family: var(--mono); font-size: 0.56rem; letter-spacing: 0.18em; color: var(--text3); text-transform: uppercase; margin-bottom: 4px; }
+.alert-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border-left: 3px solid;
+  font-size: 0.77rem;
+  animation: slide-in-left 0.3s ease both;
+}
+@keyframes slide-in-left { from { opacity:0; transform:translateX(-8px); } to { opacity:1; transform:translateX(0); } }
+.alert-item.danger  { background: rgba(255,64,64,0.08);  border-color: var(--red); }
+.alert-item.warning { background: rgba(255,192,64,0.08); border-color: var(--warn); }
+.alert-item.caution { background: rgba(120,200,255,0.07); border-color: var(--cold); }
+.alert-emoji { font-size: 1.2rem; flex-shrink: 0; }
+.alert-info  { flex: 1; min-width: 0; }
+.alert-place { font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alert-label { color: var(--text3); font-size: 0.7rem; margin-top: 1px; }
+.alert-pct   { font-family: var(--mono); font-size: 0.62rem; color: var(--text3); flex-shrink: 0; }
+
+/* Waypoints */
+.waypoint-section { padding: 0 22px 22px; display: none; flex-shrink: 0; }
+.waypoint-label { font-family: var(--mono); font-size: 0.56rem; letter-spacing: 0.18em; color: var(--text3); text-transform: uppercase; margin-bottom: 10px; padding-top: 14px; border-top: 1px solid var(--border); }
+.waypoint-scroll { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.waypoint-scroll::-webkit-scrollbar { height: 3px; }
+.waypoint-scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+.wp-item {
+  flex-shrink: 0;
+  background: rgba(20,30,52,0.6);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 10px 12px;
+  min-width: 86px;
+  max-width: 100px;
+  text-align: center;
+  transition: all 0.2s;
+  cursor: default;
+}
+.wp-item:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: 0 4px 14px rgba(77,166,255,0.2); }
+.wp-item.wp-origin { border-color: rgba(45,212,160,0.5); background: rgba(45,212,160,0.06); }
+.wp-item.wp-dest   { border-color: rgba(255,112,64,0.5);  background: rgba(255,112,64,0.06); }
+.wp-item.wp-danger  { border-color: rgba(255,64,64,0.5);  background: rgba(255,64,64,0.07); }
+.wp-item.wp-warning { border-color: rgba(255,192,64,0.5); background: rgba(255,192,64,0.07); }
+.wp-place { font-size: 0.64rem; font-weight: 700; color: var(--text2); margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wp-emoji { font-size: 1.25rem; margin-bottom: 4px; line-height: 1; }
+.wp-temp  { font-size: 0.84rem; font-weight: 700; color: var(--text); }
+.wp-cond  { font-size: 0.58rem; color: var(--text3); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Right: Map iframe */
+.nav-map-panel { display: flex; flex-direction: column; background: rgba(10,14,26,0.9); }
+.nav-map-label {
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.22em;
+  color: var(--accent);
+  padding: 10px 16px 8px;
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+  flex-shrink: 0;
+  text-shadow: 0 0 10px rgba(77,166,255,0.3);
+}
+#route-map-frame { flex: 1; border: none; display: none; filter: brightness(0.92) saturate(0.88); }
+.map-placeholder { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+.map-placeholder-icon { font-size: 4rem; opacity: 0.25; }
+.map-placeholder-text { font-size: 0.78rem; color: var(--text3); text-align: center; max-width: 220px; line-height: 1.65; }
+
+@media (max-width: 860px) {
+  .nav-layout { grid-template-columns: 1fr; grid-template-rows: auto 320px; height: auto; overflow: visible; }
+  .nav-left { border-right: none; border-bottom: 1px solid var(--border); overflow-y: visible; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────── -->
+<header>
+  <div class="logo">SKY<span>CAST</span></div>
+  <div class="header-center">
+    <div class="search-wrap">
+      <span class="search-icon">⌕</span>
+      <input type="text" id="search-input" placeholder="Search city…" autocomplete="off"/>
+      <div id="search-suggestions" class="suggestions-box"></div>
+    </div>
+  </div>
+  <div class="header-actions">
+    <button class="tab-btn active" id="btn-main">Dashboard</button>
+    <button class="tab-btn" id="btn-navigate">🗺 Navigate</button>
+    <button class="tab-btn" id="btn-compare">Compare</button>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════════════════
+     MAIN TAB
+     ══════════════════════════════════════════════════════ -->
+<div id="tab-main" class="tab-content active">
+  <div class="main-layout">
+    <div class="map-panel">
+      <div class="panel-label">EXPLORE MAP</div>
+      <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;background:rgba(20,30,52,0.6);backdrop-filter:blur(15px);">
+        <button id="travel-toggle" class="travel-btn">✈ Travel</button>
+      </div>
+      <div id="travel-input-wrap" style="display:none;padding:8px 16px 10px;background:rgba(20,30,52,0.5);border-bottom:1px solid var(--border);">
+        <div class="travel-input-group">
+          <input type="text" id="travel-input" placeholder="Search airports, stations…" autocomplete="off"/>
+        </div>
+      </div>
+      <div id="map"></div>
+      <div class="map-hint">↖ Tap anywhere to get weather</div>
+    </div>
+    <div class="info-panel">
+      <div class="current-card" id="current-card">
+        <div class="loading-state"><div class="spinner"></div><span>Locating you…</span></div>
+      </div>
+      <div class="feedback-card" id="feedback-card" style="display:none"></div>
+      <div class="section-card" id="hourly-section" style="display:none">
+        <div class="section-title">⏱ Hourly Forecast</div>
+        <div class="hourly-scroll" id="hourly-list"></div>
+      </div>
+      <div class="section-card" id="daily-section" style="display:none">
+        <div class="section-title">📅 7-Day Forecast</div>
+        <div id="daily-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     NAVIGATE TAB
+     ══════════════════════════════════════════════════════ -->
+<div id="tab-navigate" class="tab-content">
+  <div class="nav-layout">
+
+    <!-- Left: Form + Results -->
+    <div class="nav-left">
+
+      <div class="nav-header-block">
+        <div class="nav-title">Route Weather Intelligence</div>
+        <div class="nav-sub">// REAL-TIME HAZARD DETECTION ALONG YOUR ROUTE</div>
+      </div>
+
+      <div class="route-form">
+        <div class="route-input-group">
+          <div class="route-label">From</div>
+          <div class="route-input-wrap">
+            <div class="route-dot origin"></div>
+            <input class="route-input" id="nav-origin" placeholder="e.g. Coimbatore" autocomplete="off"/>
+            <div class="route-suggestions" id="ns-origin"></div>
+          </div>
+        </div>
+        <div class="route-connector"><div class="connector-line"></div></div>
+        <div class="route-input-group">
+          <div class="route-label">To</div>
+          <div class="route-input-wrap">
+            <div class="route-dot dest"></div>
+            <input class="route-input" id="nav-dest" placeholder="e.g. Chennai" autocomplete="off"/>
+            <div class="route-suggestions" id="ns-dest"></div>
+          </div>
+        </div>
+        <button class="analyze-btn" id="analyze-btn">
+          <span>🔍</span> Analyze Route Weather
+        </button>
+      </div>
+
+      <div class="nav-loading" id="nav-loading">
+        <div class="nav-loading-text" id="nav-loading-text">Plotting route…</div>
+        <div class="nav-loading-bar"><div class="nav-loading-fill"></div></div>
+      </div>
+      <div class="nav-error" id="nav-error"></div>
+
+      <div class="trip-summary" id="trip-summary">
+        <div class="summary-banner" id="summary-banner">
+          <div class="summary-icon" id="summary-icon"></div>
+          <div class="summary-text">
+            <div class="summary-status" id="summary-status"></div>
+            <div class="summary-msg"   id="summary-msg"></div>
+          </div>
+        </div>
+        <div class="trip-meta">
+          <div class="meta-pill">🛣 <span id="meta-dist">—</span></div>
+          <div class="meta-pill">⏱ <span id="meta-dur">—</span></div>
+          <div class="meta-pill">⚠ <span id="meta-alerts">0</span> alerts</div>
+        </div>
+      </div>
+
+      <div class="alert-list" id="alert-list">
+        <div class="alert-list-title">Hazards Detected</div>
+      </div>
+
+      <div class="waypoint-section" id="waypoint-section">
+        <div class="waypoint-label">Weather Along Route</div>
+        <div class="waypoint-scroll" id="waypoint-scroll"></div>
+      </div>
+
+    </div>
+
+    <!-- Right: Google Maps embed -->
+    <div class="nav-map-panel">
+      <div class="nav-map-label">ROUTE MAP — GOOGLE MAPS EMBED</div>
+      <div class="map-placeholder" id="map-placeholder">
+        <div class="map-placeholder-icon">🗺️</div>
+        <div class="map-placeholder-text">Enter a route above to see driving directions with live weather hazards overlaid</div>
+      </div>
+      <iframe id="route-map-frame" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     COMPARE TAB
+     ══════════════════════════════════════════════════════ -->
+<div id="tab-compare" class="tab-content">
+  <div class="compare-layout">
+    <div class="compare-header">
+      <h2 class="compare-title">Multi-City Comparison</h2>
+      <p class="compare-sub">Compare weather across up to 3 cities side by side</p>
+    </div>
+    <div class="compare-inputs">
+      <div class="city-input-group">
+        <div class="city-input-wrap">
+          <input type="text" class="city-search" placeholder="City 1 e.g. Chennai" data-idx="0"/>
+          <div class="city-suggestions" id="cs-0"></div>
+        </div>
+      </div>
+      <div class="compare-vs">VS</div>
+      <div class="city-input-group">
+        <div class="city-input-wrap">
+          <input type="text" class="city-search" placeholder="City 2 e.g. Mumbai" data-idx="1"/>
+          <div class="city-suggestions" id="cs-1"></div>
+        </div>
+      </div>
+      <div class="compare-vs">VS</div>
+      <div class="city-input-group">
+        <div class="city-input-wrap">
+          <input type="text" class="city-search" placeholder="City 3 (optional)" data-idx="2"/>
+          <div class="city-suggestions" id="cs-2"></div>
+        </div>
+      </div>
+    </div>
+    <div id="compare-cards" class="compare-cards"></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="App.js"></script>
+<script src="Navigate.js"></script>
+</body>
+</html>
