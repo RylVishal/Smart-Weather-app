@@ -31,20 +31,6 @@ const pinIcon = L.divIcon({
   iconAnchor: [12, 32]
 });
 
-// ── Travel Marker Icon ────────────────────────────────────
-const travelIcon = L.divIcon({
-  className: '',
-  html: `<svg width="28" height="36" viewBox="0 0 28 36" fill="none">
-    <path d="M14 0C6.27 0 0 6.27 0 14C0 23.1 14 36 14 36S28 23.1 28 14C28 6.27 21.73 0 14 0Z" fill="#2dd4a0" fill-opacity="0.95"/>
-    <circle cx="14" cy="13" r="6" fill="#080c18"/>
-    <text x="14" y="17" font-family="Arial" font-size="12" font-weight="bold" fill="#fff" text-anchor="middle" dominant-baseline="middle">✈</text>
-  </svg>`,
-  iconSize: [28, 36],
-  iconAnchor: [14, 36]
-});
-
-let isTravelMode = false;
-
 // ── API Calls ───────────────────────────────────────────
 async function fetchCurrent(lat, lon) {
   const r = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric`);
@@ -79,50 +65,10 @@ async function geocodeCity(query) {
 
 // ── Helpers ─────────────────────────────────────────────
 
-/**
- * Returns a weather emoji based on condition ID and the LOCAL hour at the location.
- * 18:00–04:59 → night/moon emojis; 05:00–17:59 → day/sun emojis.
- *
- * @param {number} id       - OpenWeatherMap weather condition id
- * @param {number} timezone - timezone offset in seconds from UTC (from API `timezone` field)
- */
 function weatherEmoji(id, timezone) {
-  // Derive local hour at the location
   const utcMs = Date.now();
   const localMs = utcMs + (timezone ?? 0) * 1000;
-  const localHour = new Date(localMs).getUTCHours(); // 0-23 in local time
-
-  const isNight = localHour >= 18 || localHour < 5; // 6 PM → 5 AM = night
-
-  // Thunderstorm, drizzle, rain, snow, atmosphere — same day/night
-  if (id >= 200 && id < 300) return '⛈️';
-  if (id >= 300 && id < 400) return '🌦️';
-  if (id >= 500 && id < 600) return isNight ? '🌧️' : '🌧️';
-  if (id >= 600 && id < 700) return '❄️';
-  if (id >= 700 && id < 800) return '🌫️';
-
-  // Clear sky
-  if (id === 800) return isNight ? '🌙' : '☀️';
-
-  // Few clouds
-  if (id === 801) return isNight ? '🌙' : '🌤️';
-
-  // Scattered / broken / overcast clouds
-  if (id > 801) return isNight ? '☁️' : '⛅';
-
-  return isNight ? '🌙' : '🌡️';
-}
-
-/**
- * Same logic but for a forecast entry that has its own dt_txt (UTC string).
- * Uses the dt_txt time directly since forecast times are in UTC and we know the offset.
- */
-function weatherEmojiForForecast(id, dtTxt, timezone) {
-  // dt_txt is "YYYY-MM-DD HH:MM:SS" in UTC
-  const utcMs = new Date(dtTxt.replace(' ', 'T') + 'Z').getTime();
-  const localMs = utcMs + (timezone ?? 0) * 1000;
   const localHour = new Date(localMs).getUTCHours();
-
   const isNight = localHour >= 18 || localHour < 5;
 
   if (id >= 200 && id < 300) return '⛈️';
@@ -133,7 +79,23 @@ function weatherEmojiForForecast(id, dtTxt, timezone) {
   if (id === 800) return isNight ? '🌙' : '☀️';
   if (id === 801) return isNight ? '🌙' : '🌤️';
   if (id > 801)   return isNight ? '☁️' : '⛅';
+  return isNight ? '🌙' : '🌡️';
+}
 
+function weatherEmojiForForecast(id, dtTxt, timezone) {
+  const utcMs = new Date(dtTxt.replace(' ', 'T') + 'Z').getTime();
+  const localMs = utcMs + (timezone ?? 0) * 1000;
+  const localHour = new Date(localMs).getUTCHours();
+  const isNight = localHour >= 18 || localHour < 5;
+
+  if (id >= 200 && id < 300) return '⛈️';
+  if (id >= 300 && id < 400) return '🌦️';
+  if (id >= 500 && id < 600) return '🌧️';
+  if (id >= 600 && id < 700) return '❄️';
+  if (id >= 700 && id < 800) return '🌫️';
+  if (id === 800) return isNight ? '🌙' : '☀️';
+  if (id === 801) return isNight ? '🌙' : '🌤️';
+  if (id > 801)   return isNight ? '☁️' : '⛅';
   return isNight ? '🌙' : '🌡️';
 }
 
@@ -148,9 +110,14 @@ function windDir(deg) {
   return d[Math.round(deg / 45) % 8];
 }
 
-function fmtHour(dtTxt) {
-  const d = new Date(dtTxt.replace(' ', 'T'));
-  const h = d.getHours();
+/**
+ * Format a forecast dt_txt (UTC) into a local hour label,
+ * applying the location's timezone offset (seconds from UTC).
+ */
+function fmtHour(dtTxt, timezone) {
+  const utcMs   = new Date(dtTxt.replace(' ', 'T') + 'Z').getTime();
+  const localMs = utcMs + (timezone ?? 0) * 1000;
+  const h = new Date(localMs).getUTCHours();
   return h === 0 ? '12am' : h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h - 12}pm`;
 }
 
@@ -163,7 +130,7 @@ function fmtDay(dtTxt) {
 function getFeedback(current, forecastList) {
   const id   = current.weather[0].id;
   const temp = current.main.temp;
-  const wind = current.wind.speed * 3.6; // km/h
+  const wind = current.wind.speed * 3.6;
 
   const next6 = forecastList ? forecastList.slice(0, 2) : [];
   const rainSoon = next6.some(f => f.weather[0].id >= 500 && f.weather[0].id < 700);
@@ -172,7 +139,6 @@ function getFeedback(current, forecastList) {
   let icon = '🌤️';
   let title = 'Weather Tips';
 
-  // ── Temperature takes highest priority ─────────────────
   if (temp <= -10) {
     icon = '🥶'; title = 'Extreme Cold Warning';
     tips.push('Dangerous wind-chill — limit time outdoors to under 10 minutes.');
@@ -194,7 +160,7 @@ function getFeedback(current, forecastList) {
     if (id >= 200 && id < 300) {
       icon = '⛈️'; title = 'Cold Thunderstorm';
       tips.push('Stay indoors — lightning risk is high.');
-      tips.push('It\'s also cold, so wrap up warmly if you must go out.');
+      tips.push("It's also cold, so wrap up warmly if you must go out.");
       tips.push('Avoid open fields, trees, and metal structures.');
     } else if (id >= 500 && id < 600) {
       icon = '🌧️'; title = 'Cold & Rainy';
@@ -209,7 +175,7 @@ function getFeedback(current, forecastList) {
     } else {
       icon = '🧥'; title = 'Cool Day';
       tips.push('A jacket or coat is a good idea today.');
-      tips.push('Pleasant for outdoor activity if you\'re dressed for it.');
+      tips.push("Pleasant for outdoor activity if you're dressed for it.");
       if (rainSoon) tips.push('Rain possible later — keep an umbrella handy.');
     }
   } else if (id >= 200 && id < 300) {
@@ -264,30 +230,12 @@ function getFeedback(current, forecastList) {
     }
   }
 
-  // ── Extra contextual tips ────────────────────────────────
   if (wind > 60) {
     tips.push('⚠️ Dangerous winds — avoid driving high-sided vehicles.');
   } else if (wind > 40) {
     tips.push('Strong gusts — secure loose outdoor items and hold on to your hat!');
   } else if (wind > 25 && temp < 10) {
     tips.push('Wind chill will make it feel significantly colder than the thermometer says.');
-  }
-
-  // ── Travel-Specific Tips ─────────────────────────────────
-  if (isTravelMode) {
-    if (wind < 15) {
-      tips.push('✅ Perfect for flights — light winds');
-    } else if (wind < 30) {
-      tips.push('ℹ️ Moderate winds — possible minor flight delays');
-    } else {
-      tips.push('⚠️ High winds — check flight/train status');
-    }
-    if (current.visibility && current.visibility / 1000 > 10) {
-      tips.push('👀 Excellent visibility — great for driving/travel');
-    }
-    if (rainSoon) {
-      tips.push('☔ Rain expected — allow extra time for delays');
-    }
   }
 
   if (!tips.length) {
@@ -302,17 +250,11 @@ function renderCurrent(data) {
   const t     = Math.round(data.main.temp);
   const feels = Math.round(data.main.feels_like);
   const id    = data.weather[0].id;
-  const tz    = data.timezone; // seconds offset from UTC
+  const tz    = data.timezone;
   const emoji = weatherEmoji(id, tz);
   const tc    = tempClass(t);
 
-  // Travel mode indicator — rendered ABOVE the card, not inside cw-top
-  const travelBadge = isTravelMode
-    ? '<div class="travel-badge" style="margin-bottom:10px;">✈ TRAVEL MODE</div>'
-    : '';
-
   document.getElementById('current-card').innerHTML = `
-    ${travelBadge}
     <div class="cw-top">
       <div class="cw-location">
         <div class="cw-city">${data.name || 'Unknown'}</div>
@@ -378,7 +320,7 @@ function renderHourly(list, timezone) {
   const items = list.slice(0, 8);
   el.innerHTML = items.map((f, i) => `
     <div class="hourly-item ${i === 0 ? 'now' : ''}">
-      <div class="h-time">${i === 0 ? 'Now' : fmtHour(f.dt_txt)}</div>
+      <div class="h-time">${i === 0 ? 'Now' : fmtHour(f.dt_txt, timezone)}</div>
       <div class="h-emoji">${weatherEmojiForForecast(f.weather[0].id, f.dt_txt, timezone)}</div>
       <div class="h-temp">${Math.round(f.main.temp)}°</div>
       <div class="h-rain">${f.pop ? Math.round(f.pop * 100) + '%' : ''}</div>
@@ -435,7 +377,7 @@ async function loadWeatherLatLon(lat, lon) {
   showLoading('Fetching weather…');
   try {
     const [cur, fc] = await Promise.all([fetchCurrent(lat, lon), fetchForecast(lat, lon)]);
-    const tz = cur.timezone; // seconds offset from UTC
+    const tz = cur.timezone;
     renderCurrent(cur);
     renderFeedback(cur, fc.list);
     renderHourly(fc.list, tz);
@@ -453,7 +395,6 @@ async function loadWeatherCity(city) {
     map.setView([cur.coord.lat, cur.coord.lon], 11);
     if (clickMarker) map.removeLayer(clickMarker);
     clickMarker = L.marker([cur.coord.lat, cur.coord.lon], { icon: pinIcon }).addTo(map);
-
     renderCurrent(cur);
     renderFeedback(cur, fc.list);
     renderHourly(fc.list, tz);
@@ -471,133 +412,6 @@ map.on('click', async (e) => {
   await loadWeatherLatLon(lat, lng);
 });
 
-// ── Travel Search with Nominatim ──────────────────────────
-let travelSearchTimeout = null;
-const travelInput = document.getElementById('travel-input');
-const travelSuggestions = document.createElement('div');
-travelSuggestions.className = 'suggestions-box';
-travelInput.parentElement.appendChild(travelSuggestions);
-
-async function searchTravelLocation(query) {
-  const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1`;
-  const response = await fetch(url, { headers: { 'Accept-Language': 'en' } });
-  if (!response.ok) return [];
-  const data = await response.json();
-  return data.filter(place => {
-    const type     = place.type || '';
-    const category = place.class || '';
-    return category === 'aeroway' ||
-           category === 'railway' ||
-           category === 'highway' ||
-           type.includes('airport') ||
-           type.includes('station') ||
-           type.includes('terminal');
-  }).slice(0, 5);
-}
-
-travelInput.addEventListener('input', () => {
-  clearTimeout(travelSearchTimeout);
-  const query = travelInput.value.trim();
-  if (query.length < 2) {
-    travelSuggestions.classList.remove('open');
-    travelSuggestions.innerHTML = '';
-    return;
-  }
-  travelSearchTimeout = setTimeout(async () => {
-    try {
-      const results = await searchTravelLocation(query);
-      if (!results.length) { travelSuggestions.classList.remove('open'); return; }
-      travelSuggestions.innerHTML = results.map(place => {
-        const name     = place.display_name.split(',')[0];
-        const fullName = place.display_name;
-        const lat      = parseFloat(place.lat);
-        const lon      = parseFloat(place.lon);
-        const type     = place.type || 'location';
-        const category = place.class || '';
-        let icon = '📍';
-        if (category === 'aeroway' || type.includes('airport')) icon = '✈️';
-        else if (category === 'railway' || type.includes('station')) icon = '🚉';
-        else if (category === 'highway') icon = '🚌';
-        return `
-          <div class="suggestion-item" data-lat="${lat}" data-lon="${lon}" data-name="${name}">
-            ${icon} <strong>${name}</strong><br>
-            <small style="color:var(--text3);font-size:0.7rem;">${fullName}</small>
-          </div>`;
-      }).join('');
-      travelSuggestions.classList.add('open');
-      travelSuggestions.querySelectorAll('.suggestion-item').forEach(item => {
-        item.addEventListener('click', async () => {
-          const lat  = parseFloat(item.dataset.lat);
-          const lon  = parseFloat(item.dataset.lon);
-          const name = item.dataset.name;
-          travelInput.value = name;
-          travelSuggestions.classList.remove('open');
-          map.setView([lat, lon], 12);
-          if (clickMarker) map.removeLayer(clickMarker);
-          clickMarker = L.marker([lat, lon], { icon: travelIcon }).addTo(map);
-          await loadWeatherLatLon(lat, lon);
-        });
-      });
-    } catch (error) {
-      console.error('Travel search error:', error);
-      travelSuggestions.classList.remove('open');
-    }
-  }, 400);
-});
-
-travelInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter') {
-    travelSuggestions.classList.remove('open');
-    const query = travelInput.value.trim();
-    if (query.length >= 2) {
-      searchTravelLocation(query).then(results => {
-        if (results.length > 0) {
-          const place = results[0];
-          const lat   = parseFloat(place.lat);
-          const lon   = parseFloat(place.lon);
-          const name  = place.display_name.split(',')[0];
-          travelInput.value = name;
-          map.setView([lat, lon], 12);
-          if (clickMarker) map.removeLayer(clickMarker);
-          clickMarker = L.marker([lat, lon], { icon: travelIcon }).addTo(map);
-          loadWeatherLatLon(lat, lon);
-        }
-      });
-    }
-  }
-  if (e.key === 'Escape') travelSuggestions.classList.remove('open');
-});
-
-document.addEventListener('click', e => {
-  if (!travelInput.contains(e.target) && !travelSuggestions.contains(e.target)) {
-    travelSuggestions.classList.remove('open');
-  }
-});
-
-// ── Travel Mode Toggle ────────────────────────────────────
-// FIX: The toggle button was INSIDE the hidden travel-input-wrap, making it
-// unclickable. It has been moved to the header in the HTML. This handler
-// now targets the button that lives outside the collapsible area.
-function toggleTravelMode() {
-  isTravelMode = !isTravelMode;
-  const wrap = document.getElementById('travel-input-wrap');
-  const btn  = document.getElementById('travel-toggle');
-
-  if (isTravelMode) {
-    wrap.style.display = 'flex';
-    btn.textContent = '🌍 Exit Travel';
-    btn.classList.add('active');
-    document.getElementById('travel-input').focus();
-  } else {
-    wrap.style.display = 'none';
-    btn.textContent = '✈ Travel';
-    btn.classList.remove('active');
-  }
-  map.invalidateSize();
-}
-
-document.getElementById('travel-toggle').addEventListener('click', toggleTravelMode);
-
 // ── Geolocation ──────────────────────────────────────────
 showLoading('Locating you…');
 if (navigator.geolocation) {
@@ -611,8 +425,7 @@ if (navigator.geolocation) {
         .bindTooltip('You', { permanent: true, direction: 'top' });
       await loadWeatherLatLon(lat, lon);
     },
-    async () => {
-      // Fallback: Coimbatore
+    async () => {       
       map.setView([11.0168, 76.9558], 11);
       await loadWeatherLatLon(11.0168, 76.9558);
     },
@@ -744,7 +557,7 @@ async function renderCompareCard(idx, cityName) {
 }
 
 document.querySelectorAll('.city-search').forEach(input => {
-  const idx   = parseInt(input.dataset.idx);
+  const idx    = parseInt(input.dataset.idx);
   const sugBox = document.getElementById(`cs-${idx}`);
 
   input.addEventListener('input', () => {
